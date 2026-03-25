@@ -17,7 +17,15 @@ if (!fs.existsSync(uploadDir)) {
 app.use("/uploads", express.static(uploadDir));
 
 app.get("/", (req, res) => {
-  res.send("Photobooth backend đang chạy");
+  res.status(200).send("Photobooth backend đang chạy");
+});
+
+app.get("/api/health", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "Server is running",
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.post("/api/upload-strip", (req, res) => {
@@ -31,29 +39,57 @@ app.post("/api/upload-strip", (req, res) => {
       });
     }
 
-    const base64Data = imageBase64.replace(/^data:image\/jpeg;base64,/, "");
-    const fileName = `${sessionId}.jpg`;
+    const match = imageBase64.match(/^data:image\/(jpeg|jpg|png|webp);base64,/i);
+    if (!match) {
+      return res.status(400).json({
+        success: false,
+        error: "imageBase64 không đúng định dạng. Chỉ hỗ trợ jpeg, jpg, png, webp",
+      });
+    }
+
+    const ext = match[1].toLowerCase() === "jpeg" ? "jpg" : match[1].toLowerCase();
+    const base64Data = imageBase64.replace(/^data:image\/(jpeg|jpg|png|webp);base64,/i, "");
+    const safeSessionId = String(sessionId).replace(/[^a-zA-Z0-9_-]/g, "");
+    const fileName = `${safeSessionId}.${ext}`;
     const filePath = path.join(uploadDir, fileName);
 
     fs.writeFileSync(filePath, base64Data, "base64");
 
     const baseUrl =
-      process.env.BASE_URL || `http://localhost:${PORT}`;
+      process.env.BASE_URL ||
+      `${req.protocol}://${req.get("host")}`;
 
     const imageUrl = `${baseUrl}/uploads/${fileName}`;
     console.log("Generated imageUrl:", imageUrl);
 
-    res.json({
+    return res.status(200).json({
       success: true,
       imageUrl,
     });
   } catch (error) {
     console.error("Upload error:", error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       error: "Upload failed",
     });
   }
+});
+
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Route not found",
+    method: req.method,
+    path: req.originalUrl,
+  });
+});
+
+app.use((err, req, res, next) => {
+  console.error("Server error:", err);
+  res.status(500).json({
+    success: false,
+    error: "Internal server error",
+  });
 });
 
 app.listen(PORT, "0.0.0.0", () => {
